@@ -1,260 +1,305 @@
-import mysql.connector
-from mysql.connector import Error
-from typing import Optional
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+from typing import Optional, Dict, List, Any
 import os
+from datetime import datetime
+from dotenv import load_dotenv
 
-# Configuración de la base de datos
+# Cargar variables de entorno desde .env
+load_dotenv()
+
+# Configuración de MongoDB
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "maglev.proxy.rlwy.net"),
-    "port": int(os.getenv("DB_PORT", 42337)),
-    "user": os.getenv("DB_USER", "root"),
-    "password": os.getenv("DB_PASSWORD", "IyiknVQqDZqjGGVpGAsgGLWkseIPZozY"),
-    "database": os.getenv("DB_DATABASE", "railway")
+    "host": os.getenv("DB_HOST"),
+    "port": int(os.getenv("DB_PORT")),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "database": os.getenv("DB_DATABASE")
 }
 
+# Variable global para la conexión
+client = None
+db = None
+
 def get_connection():
-    """Obtiene una conexión a la base de datos"""
-    try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        print(f"Error conectando a MySQL: {e}")
-        return None
-
-def execute_query(query: str, params: Optional[tuple] = None, fetch: bool = False):
-    """Ejecuta una consulta SQL y retorna los resultados si es necesario"""
-    connection = get_connection()
-    if not connection:
-        return None
+    """Obtiene una conexión a MongoDB"""
+    global client, db
     
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(query, params or ())
-        
-        if fetch:
-            result = cursor.fetchall()
+        # Construir la URI de conexión
+        if DB_CONFIG["host"].startswith("mongodb+srv://"):
+            # Para MongoDB Atlas
+            uri = DB_CONFIG["host"]
         else:
-            connection.commit()
-            result = cursor.lastrowid
+            # Para MongoDB local
+            uri = f"mongodb://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}"
         
-        cursor.close()
-        return result
-    except Error as e:
-        print(f"Error ejecutando consulta: {e}")
-        connection.rollback()
-        return None
-    finally:
-        connection.close()
+        client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        db = client[DB_CONFIG["database"]]
+        
+        # Verificar conexión
+        client.admin.command('ping')
+        print("✅ Conexión a MongoDB establecida")
+        return True
+        
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+        print(f"❌ Error conectando a MongoDB: {e}")
+        return False
 
-def execute_query_one(query: str, params: Optional[tuple] = None):
-    """Ejecuta una consulta SQL y retorna un solo resultado"""
-    connection = get_connection()
-    if not connection:
-        return None
-    
+def get_database():
+    """Obtiene la instancia de la base de datos"""
+    global db
+    if db is None:
+        get_connection()
+    return db
+
+def get_collection(collection_name: str):
+    """Obtiene una colección específica"""
+    database = get_database()
+    return database[collection_name]
+
+def insert_document(collection_name: str, document: Dict[str, Any]) -> Optional[str]:
+    """Inserta un documento en una colección y retorna el ID"""
     try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(query, params or ())
-        result = cursor.fetchone()
-        cursor.close()
-        return result
-    except Error as e:
-        print(f"Error ejecutando consulta: {e}")
+        collection = get_collection(collection_name)
+        # Agregar timestamp de creación
+        document["created_at"] = datetime.utcnow()
+        result = collection.insert_one(document)
+        return str(result.inserted_id)
+    except Exception as e:
+        print(f"❌ Error insertando documento en {collection_name}: {e}")
         return None
-    finally:
-        connection.close()
+
+def find_documents(collection_name: str, filter_dict: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    """Busca documentos en una colección"""
+    try:
+        collection = get_collection(collection_name)
+        filter_dict = filter_dict or {}
+        documents = list(collection.find(filter_dict))
+        
+        # Convertir ObjectId a string para serialización JSON
+        for doc in documents:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+        
+        return documents
+    except Exception as e:
+        print(f"❌ Error buscando documentos en {collection_name}: {e}")
+        return []
+
+def find_document_by_id(collection_name: str, document_id: str) -> Optional[Dict[str, Any]]:
+    """Busca un documento por ID"""
+    try:
+        from bson import ObjectId
+        collection = get_collection(collection_name)
+        document = collection.find_one({"_id": ObjectId(document_id)})
+        
+        if document and "_id" in document:
+            document["_id"] = str(document["_id"])
+        
+        return document
+    except Exception as e:
+        print(f"❌ Error buscando documento por ID en {collection_name}: {e}")
+        return None
+
+def update_document(collection_name: str, document_id: str, update_data: Dict[str, Any]) -> bool:
+    """Actualiza un documento por ID"""
+    try:
+        from bson import ObjectId
+        collection = get_collection(collection_name)
+        
+        # Agregar timestamp de actualización
+        update_data["updated_at"] = datetime.utcnow()
+        
+        result = collection.update_one(
+            {"_id": ObjectId(document_id)},
+            {"$set": update_data}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"❌ Error actualizando documento en {collection_name}: {e}")
+        return False
+
+def delete_document(collection_name: str, document_id: str) -> bool:
+    """Elimina un documento por ID"""
+    try:
+        from bson import ObjectId
+        collection = get_collection(collection_name)
+        result = collection.delete_one({"_id": ObjectId(document_id)})
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"❌ Error eliminando documento en {collection_name}: {e}")
+        return False
 
 def initialize_database():
-    """Inicializa la base de datos creando las tablas y datos de ejemplo"""
-    print("🗄️  Inicializando base de datos...")
+    """Inicializa la base de datos MongoDB creando las colecciones y datos de ejemplo"""
+    print("🗄️  Inicializando base de datos MongoDB...")
     
-    # Crear base de datos si no existe
-    config_without_db = DB_CONFIG.copy()
-    del config_without_db['database']
-    
-    try:
-        connection = mysql.connector.connect(**config_without_db)
-        cursor = connection.cursor()
-        cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']}")
-        cursor.close()
-        connection.close()
-        print(f"✅ Base de datos '{DB_CONFIG['database']}' verificada")
-    except Error as e:
-        print(f"❌ Error creando base de datos: {e}")
-        return False
-    
-    # Conectar a la base de datos específica
-    connection = get_connection()
-    if not connection:
+    if not get_connection():
         return False
     
     try:
-        cursor = connection.cursor()
+        database = get_database()
         
-        # Crear tablas
-        tables_sql = [
-            # Tabla Paciente
-            """CREATE TABLE IF NOT EXISTS paciente (
-                id_paciente INT AUTO_INCREMENT PRIMARY KEY,
-                nombre VARCHAR(100) NOT NULL,
-                apellido VARCHAR(100) NOT NULL,
-                fecha_nacimiento DATE NOT NULL,
-                telefono VARCHAR(20) UNIQUE,
-                email VARCHAR(120) UNIQUE,
-                direccion VARCHAR(200)
-            )""",
-            
-            # Tabla Especialidad
-            """CREATE TABLE IF NOT EXISTS especialidad (
-                id_especialidad INT AUTO_INCREMENT PRIMARY KEY,
-                nombre VARCHAR(100) NOT NULL,
-                descripcion TEXT
-            )""",
-            
-            # Tabla Doctor
-            """CREATE TABLE IF NOT EXISTS doctor (
-                id_doctor INT AUTO_INCREMENT PRIMARY KEY,
-                nombre VARCHAR(100) NOT NULL,
-                apellido VARCHAR(100) NOT NULL,
-                telefono VARCHAR(20),
-                email VARCHAR(150) UNIQUE,
-                id_especialidad INT NOT NULL,
-                FOREIGN KEY (id_especialidad) REFERENCES especialidad(id_especialidad)
-            )""",
-            
-            # Tabla Historial
-            """CREATE TABLE IF NOT EXISTS historial (
-                id_historial INT AUTO_INCREMENT PRIMARY KEY,
-                fecha DATE NOT NULL,
-                diagnostico TEXT,
-                tratamiento TEXT,
-                observaciones TEXT,
-                id_paciente INT NOT NULL,
-                id_doctor INT NOT NULL,
-                FOREIGN KEY (id_paciente) REFERENCES paciente(id_paciente),
-                FOREIGN KEY (id_doctor) REFERENCES doctor(id_doctor)
-            )""",
-            
-            # Tabla Citas
-            """CREATE TABLE IF NOT EXISTS cita (
-                id_cita INT AUTO_INCREMENT PRIMARY KEY,
-                fecha_hora DATETIME NOT NULL,
-                motivo VARCHAR(255),
-                id_paciente INT,
-                id_doctor INT,
-                FOREIGN KEY (id_paciente) REFERENCES paciente(id_paciente),
-                FOREIGN KEY (id_doctor) REFERENCES doctor(id_doctor)
-            )"""
-        ]
+        # Crear colecciones si no existen
+        collections = ["paciente", "especialidad", "doctor", "historial", "cita"]
         
-        # Ejecutar creación de tablas
-        for table_sql in tables_sql:
-            try:
-                cursor.execute(table_sql)
-                connection.commit()
-            except Error as e:
-                if "already exists" not in str(e).lower():
-                    print(f"⚠️  Advertencia creando tabla: {e}")
-        
-        print("✅ Tablas creadas/verificadas")
+        for collection_name in collections:
+            if collection_name not in database.list_collection_names():
+                database.create_collection(collection_name)
+                print(f"✅ Colección '{collection_name}' creada")
         
         # Verificar si ya existen datos de ejemplo
-        cursor.execute("SELECT COUNT(*) as count FROM especialidad")
-        result = cursor.fetchone()
+        especialidad_count = database.especialidad.count_documents({})
         
-        if result and result[0] == 0:
+        if especialidad_count == 0:
             print("📝 Insertando datos de ejemplo...")
             
             # Insertar especialidades de ejemplo
-            especialidades = [
-                ('Cardiología', 'Especialidad médica que se encarga del diagnóstico y tratamiento de las enfermedades del corazón'),
-                ('Dermatología', 'Especialidad médica que se encarga del diagnóstico y tratamiento de las enfermedades de la piel'),
-                ('Pediatría', 'Especialidad médica que se encarga del cuidado de la salud de los niños'),
-                ('Ginecología', 'Especialidad médica que se encarga de la salud del sistema reproductor femenino'),
-                ('Ortopedia', 'Especialidad médica que se encarga del diagnóstico y tratamiento de lesiones y enfermedades del sistema musculoesquelético')
+            especialidad = [
+                {
+                    "nombre": "Cardiología",
+                    "descripcion": "Especialidad médica que se encarga del diagnóstico y tratamiento de las enfermedades del corazón"
+                },
+                {
+                    "nombre": "Dermatología", 
+                    "descripcion": "Especialidad médica que se encarga del diagnóstico y tratamiento de las enfermedades de la piel"
+                },
+                {
+                    "nombre": "Pediatría",
+                    "descripcion": "Especialidad médica que se encarga del cuidado de la salud de los niños"
+                },
+                {
+                    "nombre": "Ginecología",
+                    "descripcion": "Especialidad médica que se encarga de la salud del sistema reproductor femenino"
+                },
+                {
+                    "nombre": "Ortopedia",
+                    "descripcion": "Especialidad médica que se encarga del diagnóstico y tratamiento de lesiones y enfermedades del sistema musculoesquelético"
+                }
             ]
             
-            for especialidad in especialidades:
-                cursor.execute("INSERT INTO especialidad (nombre, descripcion) VALUES (%s, %s)", especialidad)
+            for especialidad in especialidad:
+                insert_document("especialidad", especialidad)
+            
+            # Obtener IDs de especialidades para crear doctor
+            especialidad_docs = find_documents("especialidad")
             
             # Insertar doctores de ejemplo
-            doctores = [
-                ('María', 'García', '3001234567', 'maria.garcia@clinica.com', 1),
-                ('Carlos', 'Rodríguez', '3002345678', 'carlos.rodriguez@clinica.com', 2),
-                ('Ana', 'López', '3003456789', 'ana.lopez@clinica.com', 3),
-                ('Luis', 'Martínez', '3004567890', 'luis.martinez@clinica.com', 4),
-                ('Patricia', 'Hernández', '3005678901', 'patricia.hernandez@clinica.com', 5)
+            doctor = [
+                {
+                    "nombre": "María",
+                    "apellido": "García",
+                    "telefono": "3001234567",
+                    "email": "maria.garcia@clinica.com",
+                    "id_especialidad": especialidad_docs[0]["_id"]
+                },
+                {
+                    "nombre": "Carlos",
+                    "apellido": "Rodríguez", 
+                    "telefono": "3002345678",
+                    "email": "carlos.rodriguez@clinica.com",
+                    "id_especialidad": especialidad_docs[1]["_id"]
+                },
+                {
+                    "nombre": "Ana",
+                    "apellido": "López",
+                    "telefono": "3003456789", 
+                    "email": "ana.lopez@clinica.com",
+                    "id_especialidad": especialidad_docs[2]["_id"]
+                },
+                {
+                    "nombre": "Luis",
+                    "apellido": "Martínez",
+                    "telefono": "3004567890",
+                    "email": "luis.martinez@clinica.com", 
+                    "id_especialidad": especialidad_docs[3]["_id"]
+                },
+                {
+                    "nombre": "Patricia",
+                    "apellido": "Hernández",
+                    "telefono": "3005678901",
+                    "email": "patricia.hernandez@clinica.com",
+                    "id_especialidad": especialidad_docs[4]["_id"]
+                }
             ]
             
-            for doctor in doctores:
-                cursor.execute("INSERT INTO doctor (nombre, apellido, telefono, email, id_especialidad) VALUES (%s, %s, %s, %s, %s)", doctor)
+            for doctor in doctor:
+                insert_document("doctor", doctor)
             
-            # Insertar pacientes de ejemplo
-            pacientes = [
-                ('Juan', 'Pérez', '1990-05-15', '3001111111', 'juan.perez@email.com', 'Calle 123 #45-67'),
-                ('María', 'González', '1985-08-22', '3002222222', 'maria.gonzalez@email.com', 'Carrera 78 #90-12'),
-                ('Pedro', 'Sánchez', '1995-03-10', '3003333333', 'pedro.sanchez@email.com', 'Avenida 5 #23-45'),
-                ('Ana', 'Ramírez', '1988-12-05', '3004444444', 'ana.ramirez@email.com', 'Calle 67 #89-01'),
-                ('Luis', 'Torres', '1992-07-18', '3005555555', 'luis.torres@email.com', 'Carrera 34 #56-78')
+            # Insertar paciente de ejemplo
+            paciente = [
+                {
+                    "nombre": "Juan",
+                    "apellido": "Pérez",
+                    "fecha_nacimiento": "1990-05-15",
+                    "telefono": "3001111111",
+                    "email": "juan.perez@email.com",
+                    "direccion": "Calle 123 #45-67"
+                },
+                {
+                    "nombre": "María",
+                    "apellido": "González",
+                    "fecha_nacimiento": "1985-08-22",
+                    "telefono": "3002222222", 
+                    "email": "maria.gonzalez@email.com",
+                    "direccion": "Carrera 78 #90-12"
+                },
+                {
+                    "nombre": "Pedro",
+                    "apellido": "Sánchez",
+                    "fecha_nacimiento": "1995-03-10",
+                    "telefono": "3003333333",
+                    "email": "pedro.sanchez@email.com",
+                    "direccion": "Avenida 5 #23-45"
+                },
+                {
+                    "nombre": "Ana",
+                    "apellido": "Ramírez",
+                    "fecha_nacimiento": "1988-12-05",
+                    "telefono": "3004444444",
+                    "email": "ana.ramirez@email.com",
+                    "direccion": "Calle 67 #89-01"
+                },
+                {
+                    "nombre": "Luis",
+                    "apellido": "Torres",
+                    "fecha_nacimiento": "1992-07-18",
+                    "telefono": "3005555555",
+                    "email": "luis.torres@email.com",
+                    "direccion": "Carrera 34 #56-78"
+                }
             ]
             
-            for paciente in pacientes:
-                cursor.execute("INSERT INTO paciente (nombre, apellido, fecha_nacimiento, telefono, email, direccion) VALUES (%s, %s, %s, %s, %s, %s)", paciente)
+            for paciente in paciente:
+                insert_document("paciente", paciente)
             
-            # Insertar citas de ejemplo
-            citas = [
-                ('2024-01-15 10:00:00', 'Consulta de rutina', 1, 1),
-                ('2024-01-15 14:30:00', 'Revisión de piel', 2, 2),
-                ('2024-01-16 09:00:00', 'Control pediátrico', 3, 3),
-                ('2024-01-16 11:30:00', 'Consulta ginecológica', 4, 4),
-                ('2024-01-17 15:00:00', 'Revisión ortopédica', 5, 5)
-            ]
-            
-            for cita in citas:
-                cursor.execute("INSERT INTO cita (fecha_hora, motivo, id_paciente, id_doctor) VALUES (%s, %s, %s, %s)", cita)
-            
-            # Insertar historiales de ejemplo
-            historiales = [
-                ('2024-01-10', 'Hipertensión arterial', 'Enalapril 10mg diario', 'Paciente con presión arterial elevada', 1, 1),
-                ('2024-01-12', 'Dermatitis atópica', 'Cremas hidratantes y antihistamínicos', 'Paciente con piel seca y picazón', 2, 2),
-                ('2024-01-08', 'Resfriado común', 'Reposo y líquidos abundantes', 'Paciente con síntomas leves', 3, 3),
-                ('2024-01-05', 'Control ginecológico normal', 'Sin tratamiento requerido', 'Paciente en buen estado de salud', 4, 4),
-                ('2024-01-03', 'Esguince de tobillo', 'Reposo, hielo y elevación', 'Paciente con lesión deportiva', 5, 5)
-            ]
-            
-            for historial in historiales:
-                cursor.execute("INSERT INTO historial (fecha, diagnostico, tratamiento, observaciones, id_paciente, id_doctor) VALUES (%s, %s, %s, %s, %s, %s)", historial)
-            
-            connection.commit()
             print("✅ Datos de ejemplo insertados")
         else:
             print("ℹ️  Los datos de ejemplo ya existen")
         
         # Crear índices para optimizar consultas
-        indices = [
-            "CREATE INDEX IF NOT EXISTS idx_cita_fecha_hora ON cita(fecha_hora)",
-            "CREATE INDEX IF NOT EXISTS idx_cita_paciente ON cita(id_paciente)",
-            "CREATE INDEX IF NOT EXISTS idx_cita_doctor ON cita(id_doctor)",
-            "CREATE INDEX IF NOT EXISTS idx_historial_paciente ON historial(id_paciente)",
-            "CREATE INDEX IF NOT EXISTS idx_historial_fecha ON historial(fecha)",
-            "CREATE INDEX IF NOT EXISTS idx_doctor_especialidad ON doctor(id_especialidad)"
-        ]
+        try:
+            database.cita.create_index("fecha_hora")
+            database.cita.create_index("id_paciente")
+            database.cita.create_index("id_doctor")
+            database.historial.create_index("id_paciente")
+            database.historial.create_index("fecha")
+            database.doctor.create_index("id_especialidad")
+            print("✅ Índices creados/verificados")
+        except Exception as e:
+            print(f"⚠️  Advertencia creando índices: {e}")
         
-        for index_sql in indices:
-            try:
-                cursor.execute(index_sql)
-                connection.commit()
-            except Error as e:
-                if "already exists" not in str(e).lower():
-                    print(f"⚠️  Advertencia creando índice: {e}")
-        
-        print("✅ Índices creados/verificados")
-        print("🎉 Base de datos inicializada correctamente")
-        
-        cursor.close()
-        connection.close()
+        print("🎉 Base de datos MongoDB inicializada correctamente")
         return True
         
-    except Error as e:
-        print(f"❌ Error inicializando base de datos: {e}")
+    except Exception as e:
+        print(f"❌ Error inicializando base de datos MongoDB: {e}")
         return False
+
+def close_connection():
+    """Cierra la conexión a MongoDB"""
+    global client
+    if client:
+        client.close()
+        print("🔌 Conexión a MongoDB cerrada")
