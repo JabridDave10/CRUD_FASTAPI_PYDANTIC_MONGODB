@@ -14,7 +14,9 @@ from Cita import Cita
 # Importar servicio de MongoDB
 import service_mongo as service
 
-app = FastAPI()
+app = FastAPI(
+    docs_url="/docs",
+    redoc_url="/redoc")
 
 # ===========================================
 # CRUD Paciente
