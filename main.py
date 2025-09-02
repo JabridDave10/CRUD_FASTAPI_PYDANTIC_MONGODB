@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 import sys
 import os
+from typing import Dict, Any
 
 # Agregar el directorio models al path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'models'))
@@ -59,6 +60,16 @@ def actualizar_paciente(paciente_id: str, paciente: Paciente):
         }
     raise HTTPException(status_code=404, detail="Paciente no encontrado")
 
+@app.patch("/paciente/{paciente_id}")
+def actualizar_paciente_parcial(paciente_id: str, paciente_data: Dict[str, Any]):
+    """Actualizar solo campos específicos del paciente"""
+    if service.actualizar_paciente(paciente_id, paciente_data):
+        return {
+            "message": f"Paciente {paciente_id} actualizado parcialmente exitosamente",
+            "data": paciente_data
+        }
+    raise HTTPException(status_code=404, detail="Paciente no encontrado")
+
 @app.delete("/paciente/{paciente_id}")
 def eliminar_paciente(paciente_id: str):
     if service.eliminar_paciente(paciente_id):
@@ -105,6 +116,16 @@ def actualizar_especialidad(especialidad_id: str, especialidad: Especialidad):
         return {
             "message": f"Especialidad {especialidad_id} actualizada exitosamente",
             "data": especialidad.model_dump()
+        }
+    raise HTTPException(status_code=404, detail="Especialidad no encontrada")
+
+@app.patch("/especialidad/{especialidad_id}")
+def actualizar_especialidad_parcial(especialidad_id: str, especialidad_data: Dict[str, Any]):
+    """Actualizar solo campos específicos de la especialidad"""
+    if service.actualizar_especialidad(especialidad_id, especialidad_data):
+        return {
+            "message": f"Especialidad {especialidad_id} actualizada parcialmente exitosamente",
+            "data": especialidad_data
         }
     raise HTTPException(status_code=404, detail="Especialidad no encontrada")
 
@@ -157,6 +178,16 @@ def actualizar_doctor(doctor_id: str, doctor: Doctor):
         }
     raise HTTPException(status_code=404, detail="Doctor no encontrado")
 
+@app.patch("/doctor/{doctor_id}")
+def actualizar_doctor_parcial(doctor_id: str, doctor_data: Dict[str, Any]):
+    """Actualizar solo campos específicos del doctor"""
+    if service.actualizar_doctor(doctor_id, doctor_data):
+        return {
+            "message": f"Doctor {doctor_id} actualizado parcialmente exitosamente",
+            "data": doctor_data
+        }
+    raise HTTPException(status_code=404, detail="Doctor no encontrado")
+
 @app.delete("/doctor/{doctor_id}")
 def eliminar_doctor(doctor_id: str):
     if service.eliminar_doctor(doctor_id):
@@ -206,6 +237,16 @@ def actualizar_historial(historial_id: str, historial: Historial):
         }
     raise HTTPException(status_code=404, detail="Historial no encontrado")
 
+@app.patch("/historial/{historial_id}")
+def actualizar_historial_parcial(historial_id: str, historial_data: Dict[str, Any]):
+    """Actualizar solo campos específicos del historial"""
+    if service.actualizar_historial(historial_id, historial_data):
+        return {
+            "message": f"Historial {historial_id} actualizado parcialmente exitosamente",
+            "data": historial_data
+        }
+    raise HTTPException(status_code=404, detail="Historial no encontrado")
+
 @app.delete("/historial/{historial_id}")
 def eliminar_historial(historial_id: str):
     if service.eliminar_historial(historial_id):
@@ -252,6 +293,16 @@ def actualizar_cita(cita_id: str, cita: Cita):
         return {
             "message": f"Cita {cita_id} actualizada exitosamente",
             "data": cita.model_dump()
+        }
+    raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+@app.patch("/cita/{cita_id}")
+def actualizar_cita_parcial(cita_id: str, cita_data: Dict[str, Any]):
+    """Actualizar solo campos específicos de la cita"""
+    if service.actualizar_cita(cita_id, cita_data):
+        return {
+            "message": f"Cita {cita_id} actualizada parcialmente exitosamente",
+            "data": cita_data
         }
     raise HTTPException(status_code=404, detail="Cita no encontrada")
 
