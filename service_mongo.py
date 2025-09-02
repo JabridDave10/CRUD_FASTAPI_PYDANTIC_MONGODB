@@ -8,9 +8,27 @@ from datetime import datetime
 def crear_paciente(paciente_data: Dict[str, Any]) -> Optional[str]:
     """Crear un nuevo paciente"""
     try:
-        # Convertir fecha_nacimiento a string si es date
-        if hasattr(paciente_data, 'fecha_nacimiento'):
-            paciente_data['fecha_nacimiento'] = str(paciente_data['fecha_nacimiento'])
+        # Convertir fecha_nacimiento a datetime si es date o string
+        if 'fecha_nacimiento' in paciente_data:
+            from datetime import datetime, date
+            fecha_valor = paciente_data['fecha_nacimiento']
+            
+            if isinstance(fecha_valor, date):
+                # Convertir date a datetime (MongoDB no soporta date directamente)
+                paciente_data['fecha_nacimiento'] = datetime.combine(fecha_valor, datetime.min.time())
+            elif isinstance(fecha_valor, str):
+                try:
+                    # Intentar parsear la fecha en formato ISO (YYYY-MM-DD)
+                    fecha = datetime.fromisoformat(fecha_valor)
+                    paciente_data['fecha_nacimiento'] = fecha
+                except ValueError:
+                    # Si falla, intentar con otros formatos comunes
+                    try:
+                        fecha = datetime.strptime(fecha_valor, '%d/%m/%Y')
+                        paciente_data['fecha_nacimiento'] = fecha
+                    except ValueError:
+                        print(f"Error: Formato de fecha inválido: {fecha_valor}")
+                        return None
         
         paciente_id = database.insert_document("paciente", paciente_data)
         return paciente_id
@@ -29,9 +47,27 @@ def obtener_paciente(paciente_id: str) -> Optional[Dict[str, Any]]:
 def actualizar_paciente(paciente_id: str, paciente_data: Dict[str, Any]) -> bool:
     """Actualizar un paciente"""
     try:
-        # Convertir fecha_nacimiento a string si es date
-        if hasattr(paciente_data, 'fecha_nacimiento'):
-            paciente_data['fecha_nacimiento'] = str(paciente_data['fecha_nacimiento'])
+        # Convertir fecha_nacimiento a datetime si es date o string
+        if 'fecha_nacimiento' in paciente_data:
+            from datetime import datetime, date
+            fecha_valor = paciente_data['fecha_nacimiento']
+            
+            if isinstance(fecha_valor, date):
+                # Convertir date a datetime (MongoDB no soporta date directamente)
+                paciente_data['fecha_nacimiento'] = datetime.combine(fecha_valor, datetime.min.time())
+            elif isinstance(fecha_valor, str):
+                try:
+                    # Intentar parsear la fecha en formato ISO (YYYY-MM-DD)
+                    fecha = datetime.fromisoformat(fecha_valor)
+                    paciente_data['fecha_nacimiento'] = fecha
+                except ValueError:
+                    # Si falla, intentar con otros formatos comunes
+                    try:
+                        fecha = datetime.strptime(fecha_valor, '%d/%m/%Y')
+                        paciente_data['fecha_nacimiento'] = fecha
+                    except ValueError:
+                        print(f"Error: Formato de fecha inválido: {fecha_valor}")
+                        return False
         
         return database.update_document("paciente", paciente_id, paciente_data)
     except Exception as e:
