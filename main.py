@@ -16,8 +16,52 @@ from Cita import Cita
 import service_mongo as service
 
 app = FastAPI(
+    title="API Clínica Médica",
+    description="API para gestión de pacientes, doctores, especialidades, historiales y citas médicas",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc")
+
+# ===========================================
+# Health Check
+# ===========================================
+@app.get("/")
+def root():
+    """Endpoint raíz con información de la API"""
+    return {
+        "message": "API Clínica Médica funcionando correctamente",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "redoc": "/redoc"
+    }
+
+@app.get("/health")
+def health_check():
+    """Endpoint de health check para Railway"""
+    try:
+        # Verificar conexión a MongoDB
+        from database import get_connection
+        if get_connection():
+            return {
+                "status": "healthy",
+                "message": "API funcionando correctamente",
+                "database": "connected",
+                "timestamp": "2025-09-02T00:00:00Z"
+            }
+        else:
+            return {
+                "status": "unhealthy",
+                "message": "Error de conexión a la base de datos",
+                "database": "disconnected",
+                "timestamp": "2025-09-02T00:00:00Z"
+            }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Error en health check: {str(e)}",
+            "database": "error",
+            "timestamp": "2025-09-02T00:00:00Z"
+        }
 
 # ===========================================
 # CRUD Paciente

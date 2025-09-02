@@ -26,24 +26,52 @@ def get_connection():
     global client, db
     
     try:
+        # Verificar que las variables de entorno estén configuradas
+        if not DB_CONFIG["host"]:
+            print("❌ Error: DB_HOST no está configurado")
+            return False
+            
         # Construir la URI de conexión
         if DB_CONFIG["host"].startswith("mongodb+srv://"):
             # Para MongoDB Atlas
             uri = DB_CONFIG["host"]
+            print(f"🔗 Conectando a MongoDB Atlas...")
         else:
             # Para MongoDB local
+            if not all([DB_CONFIG["user"], DB_CONFIG["password"], DB_CONFIG["host"], DB_CONFIG["port"], DB_CONFIG["database"]]):
+                print("❌ Error: Variables de entorno incompletas para MongoDB local")
+                return False
             uri = f"mongodb://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}"
+            print(f"🔗 Conectando a MongoDB local en {DB_CONFIG['host']}:{DB_CONFIG['port']}...")
         
-        client = MongoClient(uri, serverSelectionTimeoutMS=5000)
-        db = client[DB_CONFIG["database"]]
+        # Configuración de conexión más robusta para producción
+        client = MongoClient(
+            uri, 
+            serverSelectionTimeoutMS=10000,  # 10 segundos
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
+            maxPoolSize=10,
+            minPoolSize=1
+        )
+        
+        # Obtener la base de datos
+        if DB_CONFIG["host"].startswith("mongodb+srv://"):
+            # Para Atlas, extraer el nombre de la base de datos de la URI
+            db_name = DB_CONFIG["host"].split("/")[-1].split("?")[0]
+            db = client[db_name]
+        else:
+            db = client[DB_CONFIG["database"]]
         
         # Verificar conexión
         client.admin.command('ping')
-        print("✅ Conexión a MongoDB establecida")
+        print(f"✅ Conexión a MongoDB establecida - Base de datos: {db.name}")
         return True
         
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
         print(f"❌ Error conectando a MongoDB: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error inesperado conectando a MongoDB: {e}")
         return False
 
 def get_database():
